@@ -1,0 +1,39 @@
+---
+- name: Increase AIX filesystem by 10%
+  hosts: all
+  gather_facts: no
+  vars:
+    ansible_python_interpreter: /opt/freeware/bin/python3
+  tasks:
+    - name: Get volume group of the filesystem
+      shell: "lslv $(df {{ filesystem_name }} | tail -1 | awk '{ print $1 }' | awk -F'/' '{ print $NF }') | grep 'VOLUME GROUP:' | awk '{print $NF}'"
+      register: vg_name
+      changed_when: false
+
+    - name: Check available free space in volume group (MB)
+      shell: "lsvg {{ vg_name.stdout }} | grep 'FREE PPs' | awk '{ print $7 }' | tr -d '('"
+      register: free_mb
+      changed_when: false
+
+    - name: Check current size of filesystem
+      shell: "df -Pm {{ filesystem_name }} | awk 'NR==2 { print $2 }'"
+      register: current_size_mb
+      changed_when: false
+
+    - name: Calculate 10% increase of filesystem size
+      set_fact:
+        increase_size_mb: "{{ ((current_size_mb.stdout | int) * 0.10) | string | split('.') | first }}"
+
+    - name: Variables
+      debug:
+        msg: "{{ free_mb.stdout }} > {{ current_size_mb.stdout }}"
+
+    - name: Check if there's enough free space in the volume group for the increase
+      fail:
+        msg: "Not enough space in the volume group to increase the filesystem by 10%."
+      when: "(free_mb.stdout | int) < (current_size_mb.stdout | int)"
+
+    - name: Increase filesystem size by 10%
+      shell: "chfs -a size=+{{ increase_size_mb }}M {{ filesystem_name }}"
+      when: "(free_mb.stdout | int) > (current_size_mb.stdout | int)"
+
